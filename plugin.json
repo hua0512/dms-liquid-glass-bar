@@ -1,0 +1,19 @@
+{
+  "id": "liquidGlassBar",
+  "name": "Liquid Glass Bar",
+  "description": "Draws a refractive liquid-glass layer behind the bar, rendered from the wallpaper",
+  "version": "1.0.0",
+  "author": "hua0512",
+  "type": "daemon",
+  "capabilities": [
+    "daemon"
+  ],
+  "component": "./LiquidGlassDaemon.qml",
+  "settings": "./LiquidGlassSettings.qml",
+  "icon": "blur_on",
+  "requires_dms": ">=2.1.0",
+  "permissions": [
+    "settings_read",
+    "settings_write"
+  ]
+}
