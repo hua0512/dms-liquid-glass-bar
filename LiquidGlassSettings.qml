@@ -30,6 +30,48 @@ PluginSettings {
         defaultValue: true
     }
 
+    ToggleSetting {
+        settingKey: "hoverGlow"
+        label: "Hover glow"
+        description: "A soft light follows the pointer across the glass."
+        defaultValue: true
+    }
+
+    ToggleSetting {
+        settingKey: "showHideAnimation"
+        label: "Show/hide animation"
+        description: "The glass gently forms when the bar appears and melts away when it hides."
+        defaultValue: true
+    }
+
+    ToggleSetting {
+        settingKey: "liveVideo"
+        label: "Live video glass"
+        description: "With a video wallpaper, the glass moves along with the video instead of showing a still frame. Needs ffmpeg. Uses a little more battery: the glass shows frames of a small clip of the video behind the bar."
+        defaultValue: false
+    }
+
+    SelectionSetting {
+        settingKey: "liveFps"
+        label: "Live video frame rate"
+        description: "How often the moving glass updates. Lower saves battery; 24 looks smooth for most videos."
+        options: [
+            {
+                "label": "15",
+                "value": "15"
+            },
+            {
+                "label": "24",
+                "value": "24"
+            },
+            {
+                "label": "30",
+                "value": "30"
+            }
+        ]
+        defaultValue: "24"
+    }
+
     SelectionSetting {
         settingKey: "shape"
         label: "Shape"
@@ -149,6 +191,16 @@ PluginSettings {
         defaultValue: 0
         minimum: 0
         maximum: 60
+        unit: "%"
+    }
+
+    SliderSetting {
+        settingKey: "contentTint"
+        label: "Wallpaper tint"
+        description: "Lets the glass pick up the colours of the wallpaper behind it."
+        defaultValue: 30
+        minimum: 0
+        maximum: 100
         unit: "%"
     }
 

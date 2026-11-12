@@ -2,7 +2,7 @@
   "id": "liquidGlassBar",
   "name": "Liquid Glass Bar",
   "description": "Draws a refractive liquid-glass layer behind the bar, rendered from the wallpaper",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "author": "hua0512",
   "type": "daemon",
   "capabilities": [

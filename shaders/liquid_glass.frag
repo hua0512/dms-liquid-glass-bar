@@ -31,6 +31,10 @@ layout(std140, binding = 0) uniform buf {
     float fgLight;     // 1 when the bar's foreground is light, 0 when dark
     float scrim;       // 0..1 max legibility scrim strength
     float shadow;      // 0..1 drop shadow strength
+    vec4 contentTint;  // average wallpaper colour behind the bar + strength
+    vec2 hoverPos;     // pointer position over the bar (window coordinates)
+    float hover;       // 0..1 pointer glow strength (0 when the pointer is elsewhere)
+    float appear;      // 0..1 materialize progress when the bar shows or hides
 } ubuf;
 
 layout(binding = 1) uniform sampler2D sharpTex; // wallpaper under and around the window, 1:1
@@ -74,19 +78,36 @@ vec3 sharpAt(vec2 p) {
 }
 
 // Gaussian-weighted Vogel disk over the downscaled texture.
+// Same 24 taps, with constant offsets and weights evaluated ahead of time.
 vec3 blurAt(vec2 p, float radius) {
     vec2 uv = (p - ubuf.blurRect.xy) / ubuf.blurRect.zw;
     vec2 k = vec2(radius) / ubuf.blurRect.zw;
     vec3 acc = vec3(0.0);
-    float wsum = 0.0;
-    for (int i = 0; i < 24; i++) {
-        float r = sqrt((float(i) + 0.5) / 24.0);
-        float a = float(i) * 2.39996323;
-        float w = exp(-2.5 * r * r);
-        acc += texture(blurTex, uv + vec2(cos(a), sin(a)) * r * k).rgb * w;
-        wsum += w;
-    }
-    return acc / wsum;
+    acc += texture(blurTex, uv + vec2(0.144337567, 0.000000000) * k).rgb * 0.949249759;
+    acc += texture(blurTex, uv + vec2(-0.184342220, 0.168872574) * k).rgb * 0.855345327;
+    acc += texture(blurTex, uv + vec2(0.028216531, -0.321512821) * k).rgb * 0.770730381;
+    acc += texture(blurTex, uv + vec2(0.232351428, 0.303061293) * k).rgb * 0.694485960;
+    acc += texture(blurTex, uv + vec2(-0.426393447, -0.075422997) * k).rgb * 0.625784010;
+    acc += texture(blurTex, uv + vec2(0.403917096, -0.256938993) * k).rgb * 0.563878393;
+    acc += texture(blurTex, uv + vec2(-0.135102365, 0.502574059) * k).rgb * 0.508096782;
+    acc += texture(blurTex, uv + vec2(-0.257654859, -0.496098754) * k).rgb * 0.457833362;
+    acc += texture(blurTex, uv + vec2(0.559007984, 0.204148820) * k).rgb * 0.412542245;
+    acc += texture(blurTex, uv + vec2(-0.581554660, 0.240057308) * k).rgb * 0.371731547;
+    acc += texture(blurTex, uv + vec2(0.280347776, -0.599086909) * k).rgb * 0.334958043;
+    acc += texture(blurTex, uv + vec2(0.207169872, 0.660490205) * k).rgb * 0.301822354;
+    acc += texture(blurTex, uv + vec2(-0.624412405, -0.361859755) * k).rgb * 0.271964609;
+    acc += texture(blurTex, uv + vec2(0.732506831, -0.161039569) * k).rgb * 0.245060539;
+    acc += texture(blurTex, uv + vec2(-0.447037518, 0.635864863) * k).rgb * 0.220817951;
+    acc += texture(blurTex, uv + vec2(-0.103276014, -0.796973901) * k).rgb * 0.198973559;
+    acc += texture(blurTex, uv + vec2(0.634013451, 0.534347213) * k).rgb * 0.179290121;
+    acc += texture(blurTex, uv + vec2(-0.853183369, 0.035281807) * k).rgb * 0.161553864;
+    acc += texture(blurTex, uv + vec2(0.622331776, -0.619303232) * k).rgb * 0.145572165;
+    acc += texture(blurTex, uv + vec2(-0.041636411, 0.900425682) * k).rgb * 0.131171454;
+    acc += texture(blurTex, uv + vec2(-0.592150676, -0.709594422) * k).rgb * 0.118195332;
+    acc += texture(blurTex, uv + vec2(0.938032059, 0.126210892) * k).rgb * 0.106502871;
+    acc += texture(blurTex, uv + vec2(-0.794792670, 0.552996032) * k).rgb * 0.095967086;
+    acc += texture(blurTex, uv + vec2(0.217183078, -0.965400527) * k).rgb * 0.086473552;
+    return acc * 0.113533135;
 }
 
 float luma(vec3 c) {
@@ -105,12 +126,16 @@ void main() {
     float d = sdf(p);
     float cover = clamp(0.5 - d * ubuf.pxRatio, 0.0, 1.0);
 
-    // Soft drop shadow, slightly below the slab, only outside it.
+    // Soft, wide, low drop shadow, a little below the slab, only outside it.
     float shadowA = 0.0;
     if (ubuf.shadow > 0.0 && cover < 1.0) {
-        float ds = sdf(p - vec2(0.0, 1.5));
-        shadowA = ubuf.shadow * 0.18 * exp(-max(ds, 0.0) / 3.0) * (1.0 - cover);
+        float ds = max(sdf(p - vec2(0.0, 3.0)), 0.0);
+        shadowA = ubuf.shadow * 0.30 * exp(-ds * ds / 72.0) * (1.0 - cover);
     }
+    // Materialize: the slab fades in while its lensing builds up, and the shadow follows.
+    float appear = smoothstep(0.0, 1.0, ubuf.appear);
+    cover *= appear;
+    shadowA *= appear;
     if (cover <= 0.0) {
         fragColor = vec4(0.0, 0.0, 0.0, shadowA) * ubuf.qt_Opacity;
         return;
@@ -128,13 +153,19 @@ void main() {
     float s = max(-d, 0.0);
     float x = clamp(s / max(ubuf.bevel, 1e-3), 0.0, 1.0);
     float u = 1.0 - x;
-    vec2 off = -n * ubuf.depth * pow(u, 1.5) * ubuf.lensSign;
+    vec2 off = -n * ubuf.depth * appear * pow(u, 1.5) * ubuf.lensSign;
     vec3 col;
-    if (ubuf.dispersion > 0.0) {
+    // The frost blur of the flat body, reused for the legibility scrim below.
+    vec3 bodyBlur = vec3(-1.0);
+    // Inside the flat body off is zero, so the three channel samples are identical.
+    if (ubuf.dispersion > 0.0 && dot(off, off) > 0.0) {
         // Fringe grows with the bend, so it only shows right at the edge.
         col = vec3(sampleScene(p + off * (1.0 - ubuf.dispersion)).r,
                    sampleScene(p + off).g,
                    sampleScene(p + off * (1.0 + ubuf.dispersion)).b);
+    } else if (ubuf.frost > 0.0 && dot(off, off) == 0.0) {
+        bodyBlur = blurAt(p, ubuf.blurRadius);
+        col = mix(sharpAt(p), bodyBlur, ubuf.frost);
     } else {
         col = sampleScene(p + off);
     }
@@ -142,12 +173,19 @@ void main() {
     col = clamp(mix(vec3(luma(col)), col, ubuf.saturation), 0.0, 1.0);
     col = mix(col, ubuf.tint.rgb, ubuf.tint.a);
 
+    // Pick up the colour of the surroundings: the average wallpaper colour, slightly richer.
+    if (ubuf.contentTint.a > 0.0) {
+        vec3 avg = clamp(mix(vec3(luma(ubuf.contentTint.rgb)), ubuf.contentTint.rgb, 1.4), 0.0, 1.0);
+        col = mix(col, avg, ubuf.contentTint.a);
+    }
+
     // A very slight lift of the body, compressed towards white so it never clips.
     col = col + (1.0 - col) * ubuf.lift;
 
     // Legibility scrim: only where the wallpaper behind fights the foreground, and only a little.
     if (ubuf.scrim > 0.0) {
-        float bg = luma(blurAt(p, 18.0));
+        // The background behind the text: the body's frost blur, or one tap of the blurred copy.
+        float bg = luma(bodyBlur.r >= 0.0 ? bodyBlur : texture(blurTex, (p - ubuf.blurRect.xy) / ubuf.blurRect.zw).rgb);
         float need = ubuf.fgLight > 0.5 ? smoothstep(0.35, 0.75, bg) : 1.0 - smoothstep(0.25, 0.65, bg);
         vec3 toward = ubuf.fgLight > 0.5 ? vec3(0.0) : vec3(1.0);
         col = mix(col, toward, need * ubuf.scrim * 0.12);
@@ -156,14 +194,26 @@ void main() {
     // Rim shading: the curved band is a touch darker, giving the slab some thickness.
     col *= 1.0 - 0.05 * ubuf.highlight * u * u;
 
-    // Specular: a crisp arc just inside the edge, brightest on the top-left and bottom-right
-    // curves and tapering along the straight edges, plus a faint hairline all round.
+    // Light gathers where the rim bends it: a thin bright refracted ring just inside the edge,
+    // lit from the top left with a softer counter-light from the bottom right, over a faint
+    // glow across the outer part of the bevel.
     float sd = s * ubuf.pxRatio;
     float hair = exp(-sd * sd / 1.2);
-    float band = exp(-pow((sd - 1.3) / 1.1, 2.0));
-    float arc1 = pow(max(dot(n, normalize(vec2(-0.72, -0.69))), 0.0), 6.0);
-    float arc2 = pow(max(dot(n, normalize(vec2(0.72, 0.69))), 0.0), 6.0);
-    float spec = ubuf.highlight * (band * (0.75 * arc1 + 0.45 * arc2) + 0.22 * hair);
+    float bt = (sd - 1.6) / 1.4;
+    float band = exp(-bt * bt);
+    float arc1 = pow(max(dot(n, normalize(vec2(-0.72, -0.69))), 0.0), 4.0);
+    float arc2 = pow(max(dot(n, normalize(vec2(0.72, 0.69))), 0.0), 4.0);
+    float ring = band * (0.16 + 0.70 * arc1 + 0.38 * arc2) + 0.20 * hair;
+    float lensGlow = 0.07 * pow(u, 3.0) * (0.6 + 0.4 * arc1);
+    // Pointer light: a soft glow on the glass under the pointer that also brightens the ring.
+    float glow = 0.0;
+    if (ubuf.hover > 0.0) {
+        float r = max(min(ubuf.body.z, ubuf.body.w), 1.0); // the bar's thickness, also when vertical
+        vec2 dp = p - ubuf.hoverPos;
+        glow = ubuf.hover * exp(-dot(dp, dp) / (2.0 * r * r));
+        ring += glow * band * 0.6;
+    }
+    float spec = ubuf.highlight * appear * (ring + lensGlow) + 0.09 * glow;
     spec = min(spec, 0.7);
     col = col + (1.0 - col) * spec;
 

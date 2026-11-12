@@ -72,6 +72,18 @@ void main() {
         for (int i = 0; i < 2; i++) {
             vec3 S = i == 0 ? ubuf.srcText.rgb : ubuf.srcVariant.rgb;
             vec3 D = i == 0 ? ubuf.dstText.rgb : ubuf.dstVariant.rgb;
+            if (max(S.r, max(S.g, S.b)) < 0.35) {
+                // A dark source colour can't be split per channel, but its sub-pixel glyph edges
+                // stay dark, close to it and tinted (unlike the neutral edges of an image):
+                // redraw them in the target colour with the same alpha.
+                vec3 dev = c - S;
+                float tintDev = length(dev - vec3((dev.r + dev.g + dev.b) / 3.0));
+                if (px.a < 0.995 && distance(c, S) < 0.15 && tintDev > 0.02) {
+                    fragColor = vec4(D * px.a, px.a) * ubuf.qt_Opacity;
+                    return;
+                }
+                continue;
+            }
             if (min(S.r, min(S.g, S.b)) < 0.3)
                 continue;
             vec3 Ff = ubuf.srcFill.rgb * ubuf.fillAlpha;
