@@ -48,7 +48,7 @@ Then let the glass shine through:
 
 1. Open **Settings → Bar → Appearance**, set the bar's **transparency to 0** and turn its **border off**.
 2. For the floating Apple look, on the same page set **Edge spacing** to **8**, turn **Goth corners** off, and under **Widget style → Background** turn on **Override** and set the **Opacity** to **0**, so the widgets sit straight on the glass.
-3. **On niri**, turn off the compositor's own blur for the bar by adding this to `~/.config/niri/config.kdl`:
+3. **On niri**, add this to `~/.config/niri/config.kdl`. The first rule turns off the compositor's own blur for the bar. The other two keep the glass still, together with the wallpaper, so it doesn't slide away when you switch workspaces or shrink into the overview (and fade back in late) when you open and close it:
 
    ```kdl
    layer-rule {
@@ -57,7 +57,17 @@ Then let the glass shine through:
            blur false
        }
    }
+   layer-rule {
+       match namespace="^quickshell$"
+       place-within-backdrop true
+   }
+   layer-rule {
+       match namespace="^dms:liquid-glass$"
+       place-within-backdrop true
+   }
    ```
+
+   Keep the last two rules together: with only the glass rule, the wallpaper would cover the glass.
 
 That's it.
 

@@ -6,8 +6,9 @@ import qs.Common
 import qs.Services
 import qs.Modules.Plugins
 
-// Puts a Bottom-layer window under each DMS bar and renders the wallpaper behind the bar's
-// shape through a liquid-glass shader. The bar sits on the Top layer, so its widgets stay on top.
+// Puts a window under each DMS bar (Bottom layer, or Background on niri) and renders the wallpaper
+// behind the bar's shape through a liquid-glass shader. The bar sits on the Top layer, so its
+// widgets stay on top.
 // Everything is static: the window only repaints when wallpaper, bar geometry or settings change,
 // plus briefly while the pointer moves over the bar or the bar shows or hides.
 PluginComponent {
@@ -124,6 +125,7 @@ PluginComponent {
     Connections {
         target: Quickshell
         function onScreensChanged() {
+            root.checkStacking();
             const svc = root.pluginService;
             const vars = svc?.globalVars?.[root.pluginId] ?? {};
             const names = Quickshell.screens.map(s => s.name);
@@ -131,6 +133,70 @@ PluginComponent {
                 const m = /^video(Clock|Seen):(.*)$/.exec(k);
                 if (m && vars[k] !== null && names.indexOf(m[2]) < 0)
                     svc.setGlobalVar(root.pluginId, k, null);
+            }
+        }
+    }
+
+    // On niri the glass shares the Background layer with DMS's wallpaper, and within a layer the
+    // surface mapped last is drawn on top. The glass normally maps after the wallpaper, but DMS can
+    // map its wallpaper window again (for instance when an output comes back), which would hide
+    // the glass behind it; at startup it maps the wallpaper only once the picture has loaded, which
+    // can also be after the glass. niri lists layer surfaces in mapping order, so after the glass
+    // maps or outputs change, check that order a few times (backing off) and map any glass window
+    // that ended up below a wallpaper again.
+    function checkStacking() {
+        if (!CompositorService.isNiri)
+            return;
+        stackCheck.round = 0;
+        stackCheck.interval = 1000;
+        stackCheck.restart();
+    }
+    Timer {
+        id: stackCheck
+        property int round: 0
+        onTriggered: {
+            if (stackQuery.running) {
+                restart();
+                return;
+            }
+            stackQuery.running = true;
+            if (++round < 3) {
+                interval *= 4;
+                restart();
+            }
+        }
+    }
+    Process {
+        id: stackQuery
+        command: ["niri", "msg", "--json", "layers"]
+        stdout: StdioCollector {
+            id: stackOut
+        }
+        onExited: code => {
+            if (code !== 0)
+                return;
+            let layers;
+            try {
+                layers = JSON.parse(stackOut.text);
+            } catch (e) {
+                return;
+            }
+            // Outputs where some wallpaper surface was mapped after the glass.
+            const buried = {};
+            const glassSeen = {};
+            for (const l of layers ?? []) {
+                if (l.layer !== "Background")
+                    continue;
+                if (l.namespace === "dms:liquid-glass")
+                    glassSeen[l.output] = true;
+                else if (l.namespace === "quickshell" && glassSeen[l.output])
+                    buried[l.output] = true;
+            }
+            for (const w of glassWindows.instances) {
+                if (w?.screen && buried[w.screen.name]) {
+                    console.info("liquidGlassBar: glass was below the wallpaper on", w.screen.name, "- mapping it again");
+                    w.restack();
+                }
             }
         }
     }
@@ -156,6 +222,7 @@ PluginComponent {
     }
 
     Variants {
+        id: glassWindows
         model: root.barKeys
 
         delegate: PanelWindow {
@@ -912,9 +979,27 @@ PluginComponent {
                 interval: 1500
                 onTriggered: win.mapped = win.wantMapped
             }
-            visible: mapped
+            onMappedChanged: {
+                if (mapped)
+                    root.checkStacking();
+            }
+            // Briefly unmapped to put the surface back on top of its layer (see checkStacking).
+            property bool restacking: false
+            function restack() {
+                if (!mapped || restacking)
+                    return;
+                restacking = true;
+                Qt.callLater(() => {
+                    win.restacking = false;
+                });
+            }
+            visible: mapped && !restacking
             exclusionMode: ExclusionMode.Ignore
-            WlrLayershell.layer: WlrLayer.Bottom
+            // niri draws the Bottom layer inside each workspace, so the glass would slide away on a
+            // workspace switch and shrink into the overview while the bar stays put. On the
+            // Background layer it can join the wallpaper in the overview backdrop
+            // (place-within-backdrop), which never moves; without that rule it acts as before.
+            WlrLayershell.layer: CompositorService.isNiri ? WlrLayer.Background : WlrLayer.Bottom
             WlrLayershell.namespace: "dms:liquid-glass"
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
             mask: Region {}
